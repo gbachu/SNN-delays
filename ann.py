@@ -52,8 +52,8 @@ class ANN(Model):
         super().__init__(config)
 
         self.config = config
-    # Add 2nd param, need to change build_model call in model.py to say 'Quadratic'
-    def build_model(self, type='Linear'):
+    # Add 2nd param
+    def build_model(self, type='Quadratic'):
         # Wrap original in if statement
         if type == 'Linear':
             self.blocks = [[nn.Linear(self.config.n_inputs, self.config.n_hidden_neurons, bias=self.config.bias),
