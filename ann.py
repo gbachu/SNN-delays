@@ -52,7 +52,7 @@ class ANN(Model):
         super().__init__(config)
 
         self.config = config
-    # Add 2nd param, need to change build_model call in config.py to say 'Quadratic'
+    # Add 2nd param, need to change build_model call in model.py to say 'Quadratic'
     def build_model(self, type='Linear'):
         # Wrap original in if statement
         if type == 'Linear':
