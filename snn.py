@@ -4,6 +4,7 @@ import torch.nn.functional as F
 
 from spikingjelly.activation_based import neuron, layer
 from spikingjelly.activation_based import functional
+import quadratic
 
 from model import Model
 from utils import set_seed
@@ -17,94 +18,181 @@ class SNN(Model):
     
     # Try factoring this method
     # Check ThresholdDependent batchnorm (in spikingjelly)
-    def build_model(self):
-
-        ########################### Model Description :
-        #
-        #  self.blocks = (n_layers,  0:weights+bn  |  1: lif+dropout+(synapseFilter) ,  element in sub-block)
-        #
-
-
-        ################################################   First Layer    #######################################################
-
-        self.blocks = [[[layer.Linear(self.config.n_inputs, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
-                        [layer.Dropout(self.config.dropout_p, step_mode='m')]]]
-        
-        if self.config.use_batchnorm: self.blocks[0][0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
-        if self.config.spiking_neuron_type == 'lif': 
-            self.blocks[0][1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
-                                                       surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                       step_mode='m', decay_input=False, store_v_seq = True))
-
-        elif self.config.spiking_neuron_type == 'plif': 
-            self.blocks[0][1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
-                                                       surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                       step_mode='m', decay_input=False, store_v_seq = True))
-
-
-        if self.config.stateful_synapse:
-            self.blocks[0][1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
-                                                         step_mode='m'))
-
-
-        ################################################   Hidden Layers    #######################################################
-
-        for i in range(self.config.n_hidden_layers-1):
-            self.block = [[layer.Linear(self.config.n_hidden_neurons, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
-                            [layer.Dropout(self.config.dropout_p, step_mode='m')]]
-        
-            if self.config.use_batchnorm: self.block[0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
-            if self.config.spiking_neuron_type == 'lif': 
-                self.block[1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
-                                                       surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                       step_mode='m', decay_input=False, store_v_seq = True))
-            elif self.config.spiking_neuron_type == 'plif': 
-                self.block[1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
-                                                       surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                       step_mode='m', decay_input=False, store_v_seq = True))
+    def build_model(self, type='Quadratic'):
+        if type == 'Quadratic':
+            ########################### Model Description :
+            #
+            #  self.blocks = (n_layers,  0:weights+bn  |  1: lif+dropout+(synapseFilter) ,  element in sub-block)
+            #
+    
+    
+            ################################################   First Layer    #######################################################
+    
+            self.blocks = [[[layer.Quadratic(self.config.n_inputs, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
+                            [layer.Dropout(self.config.dropout_p, step_mode='m')]]]
             
+            if self.config.use_batchnorm: self.blocks[0][0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
+            if self.config.spiking_neuron_type == 'lif': 
+                self.blocks[0][1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+    
+            elif self.config.spiking_neuron_type == 'plif': 
+                self.blocks[0][1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+    
+    
             if self.config.stateful_synapse:
-                self.block[1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
+                self.blocks[0][1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
                                                              step_mode='m'))
-
-            self.blocks.append(self.block)
-
-
-        ################################################   Final Layer    #######################################################
-
-
-        self.final_block = [[layer.Linear(self.config.n_hidden_neurons, self.config.n_outputs, bias = self.config.bias, step_mode='m')]]
-        if self.config.spiking_neuron_type == 'lif':
-            self.final_block.append([neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
-                                                    surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                    step_mode='m', decay_input=False, store_v_seq = True)])
-        elif self.config.spiking_neuron_type == 'plif': 
-            self.final_block.append([neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
-                                                    surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
-                                                    step_mode='m', decay_input=False, store_v_seq = True)])
-
-
-
-        self.blocks.append(self.final_block)
-
-        self.model = [l for block in self.blocks for sub_block in block for l in sub_block]
-        self.model = nn.Sequential(*self.model)
-        #print(self.model)
-
-        self.positions = []
-        self.weights = []
-        self.weights_bn = []
-        self.weights_plif = []
-        for m in self.model.modules():
-            if isinstance(m, layer.Linear):
-                self.weights.append(m.weight)
-                if self.config.bias:
+    
+    
+            ################################################   Hidden Layers    #######################################################
+    
+            for i in range(self.config.n_hidden_layers-1):
+                self.block = [[layer.Quadratic(self.config.n_hidden_neurons, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
+                                [layer.Dropout(self.config.dropout_p, step_mode='m')]]
+            
+                if self.config.use_batchnorm: self.block[0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
+                if self.config.spiking_neuron_type == 'lif': 
+                    self.block[1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+                elif self.config.spiking_neuron_type == 'plif': 
+                    self.block[1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+                
+                if self.config.stateful_synapse:
+                    self.block[1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
+                                                                 step_mode='m'))
+    
+                self.blocks.append(self.block)
+    
+    
+            ################################################   Final Layer    #######################################################
+    
+    
+            self.final_block = [[layer.Quadratic(self.config.n_hidden_neurons, self.config.n_outputs, bias = self.config.bias, step_mode='m')]]
+            if self.config.spiking_neuron_type == 'lif':
+                self.final_block.append([neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
+                                                        surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                        step_mode='m', decay_input=False, store_v_seq = True)])
+            elif self.config.spiking_neuron_type == 'plif': 
+                self.final_block.append([neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
+                                                        surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                        step_mode='m', decay_input=False, store_v_seq = True)])
+    
+    
+    
+            self.blocks.append(self.final_block)
+    
+            self.model = [l for block in self.blocks for sub_block in block for l in sub_block]
+            self.model = nn.Sequential(*self.model)
+            #print(self.model)
+    
+            self.positions = []
+            self.weights = []
+            self.weights_bn = []
+            self.weights_plif = []
+            for m in self.model.modules():
+                if isinstance(m, layer.Quadratic):
+                    self.weights.append(m.weight)
+                    if self.config.bias:
+                        self.weights_bn.append(m.bias)
+                elif isinstance(m, layer.BatchNorm1d):
+                    self.weights_bn.append(m.weight)
                     self.weights_bn.append(m.bias)
-            elif isinstance(m, layer.BatchNorm1d):
-                self.weights_bn.append(m.weight)
-                self.weights_bn.append(m.bias)
-            elif isinstance(m, neuron.ParametricLIFNode):
-                self.weights_plif.append(m.w)
+                elif isinstance(m, neuron.ParametricLIFNode):
+                    self.weights_plif.append(m.w)
+        else:
+            ########################### Model Description :
+            #
+            #  self.blocks = (n_layers,  0:weights+bn  |  1: lif+dropout+(synapseFilter) ,  element in sub-block)
+            #
+    
+    
+            ################################################   First Layer    #######################################################
+    
+            self.blocks = [[[layer.Linear(self.config.n_inputs, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
+                            [layer.Dropout(self.config.dropout_p, step_mode='m')]]]
+            
+            if self.config.use_batchnorm: self.blocks[0][0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
+            if self.config.spiking_neuron_type == 'lif': 
+                self.blocks[0][1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+    
+            elif self.config.spiking_neuron_type == 'plif': 
+                self.blocks[0][1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+    
+    
+            if self.config.stateful_synapse:
+                self.blocks[0][1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
+                                                             step_mode='m'))
+    
+    
+            ################################################   Hidden Layers    #######################################################
+    
+            for i in range(self.config.n_hidden_layers-1):
+                self.block = [[layer.Linear(self.config.n_hidden_neurons, self.config.n_hidden_neurons, bias = self.config.bias, step_mode='m')],
+                                [layer.Dropout(self.config.dropout_p, step_mode='m')]]
+            
+                if self.config.use_batchnorm: self.block[0].insert(1, layer.BatchNorm1d(self.config.n_hidden_neurons, step_mode='m'))
+                if self.config.spiking_neuron_type == 'lif': 
+                    self.block[1].insert(0, neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+                elif self.config.spiking_neuron_type == 'plif': 
+                    self.block[1].insert(0, neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.v_threshold, 
+                                                           surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                           step_mode='m', decay_input=False, store_v_seq = True))
+                
+                if self.config.stateful_synapse:
+                    self.block[1].append(layer.SynapseFilter(tau=self.config.stateful_synapse_tau, learnable=self.config.stateful_synapse_learnable, 
+                                                                 step_mode='m'))
+    
+                self.blocks.append(self.block)
+    
+    
+            ################################################   Final Layer    #######################################################
+    
+    
+            self.final_block = [[layer.Linear(self.config.n_hidden_neurons, self.config.n_outputs, bias = self.config.bias, step_mode='m')]]
+            if self.config.spiking_neuron_type == 'lif':
+                self.final_block.append([neuron.LIFNode(tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
+                                                        surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                        step_mode='m', decay_input=False, store_v_seq = True)])
+            elif self.config.spiking_neuron_type == 'plif': 
+                self.final_block.append([neuron.ParametricLIFNode(init_tau=self.config.init_tau, v_threshold=self.config.output_v_threshold, 
+                                                        surrogate_function=self.config.surrogate_function, detach_reset=self.config.detach_reset, 
+                                                        step_mode='m', decay_input=False, store_v_seq = True)])
+    
+    
+    
+            self.blocks.append(self.final_block)
+    
+            self.model = [l for block in self.blocks for sub_block in block for l in sub_block]
+            self.model = nn.Sequential(*self.model)
+            #print(self.model)
+    
+            self.positions = []
+            self.weights = []
+            self.weights_bn = []
+            self.weights_plif = []
+            for m in self.model.modules():
+                if isinstance(m, layer.Linear):
+                    self.weights.append(m.weight)
+                    if self.config.bias:
+                        self.weights_bn.append(m.bias)
+                elif isinstance(m, layer.BatchNorm1d):
+                    self.weights_bn.append(m.weight)
+                    self.weights_bn.append(m.bias)
+                elif isinstance(m, neuron.ParametricLIFNode):
+                    self.weights_plif.append(m.w)
 
 
 
