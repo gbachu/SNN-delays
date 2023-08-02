@@ -16,7 +16,7 @@ class Model(nn.Module):
 
         self.config = config
 
-        self.build_model()
+        self.build_model('Quadratic')
         self.init_model()
 
         self.init_pos = []
